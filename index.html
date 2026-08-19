@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenSRS → Route 53 Zone File Generator</title>
+<title>OpenSRS DNS Record Generator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -20,7 +20,7 @@
   .wrap{max-width:720px;margin:0 auto;}
   .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--signal);font-weight:600;margin:0 0 10px;}
   h1{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:clamp(26px,4.5vw,36px);letter-spacing:-.02em;margin:0 0 6px;}
-  .sub{color:var(--ink-soft);font-size:14.5px;margin:0 0 26px;max-width:56ch;}
+  .sub{color:var(--ink-soft);font-size:14.5px;margin:0 0 26px;max-width:58ch;}
 
   .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:0 1px 2px rgba(24,36,48,.04);margin-bottom:22px;}
   label{display:block;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);font-weight:600;margin:0 0 8px;}
@@ -38,12 +38,21 @@
   .ttl{display:flex;align-items:center;gap:8px;font-size:13.5px;}
   .ttl input{width:84px;text-align:center;}
 
+  .tabs{display:flex;gap:6px;margin:0 0 16px;flex-wrap:wrap;}
+  .tab{
+    font-family:"Inter",sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;
+    border:1px solid var(--line);background:var(--card);color:var(--ink-soft);
+    border-radius:9px;padding:8px 16px;transition:.15s;
+  }
+  .tab:hover{border-color:var(--signal);color:var(--signal-deep);}
+  .tab.active{background:var(--signal);border-color:var(--signal);color:#fff;}
+
   .out-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;}
   .out-head h2{font-family:"Space Grotesk",sans-serif;font-size:16px;margin:0;font-weight:600;}
   .count{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-soft);}
   pre{
     margin:0;background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:16px 18px;
-    font-family:"IBM Plex Mono",monospace;font-size:13px;line-height:1.75;overflow-x:auto;white-space:pre;
+    font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.75;overflow-x:auto;white-space:pre;
   }
   .btn{
     font-family:"Inter",sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;
@@ -62,9 +71,9 @@
 </style>
 
 <div class="wrap">
-  <p class="eyebrow">OpenSRS · hostedemail → Route 53</p>
-  <h1>Zone File Generator</h1>
-  <p class="sub">Paste one domain per line. Generates the BIND zone-file block (CNAME + MX + SPF) ready to paste into Route 53's <em>Import zone file</em> box. Trailing dots handled for you.</p>
+  <p class="eyebrow">OpenSRS · hostedemail records</p>
+  <h1>DNS Record Generator</h1>
+  <p class="sub">Paste one domain per line, pick your DNS host, and get paste-ready mail records (CNAME + MX + SPF). Route 53 &amp; Cloudflare use BIND import; Namecheap is manual entry.</p>
 
   <div class="panel">
     <label for="domains">Domains — one per line</label>
@@ -80,8 +89,14 @@ example.net</textarea>
   </div>
 
   <div class="panel">
+    <div class="tabs">
+      <button class="tab active" data-p="route53">Route 53</button>
+      <button class="tab" data-p="cloudflare">Cloudflare</button>
+      <button class="tab" data-p="namecheap">Namecheap</button>
+    </div>
+
     <div class="out-head">
-      <h2>Zone file output</h2>
+      <h2 id="outTitle">Zone file — Route 53</h2>
       <span class="count" id="count"></span>
     </div>
     <pre id="out"></pre>
@@ -89,10 +104,7 @@ example.net</textarea>
       <button class="btn" id="copy">Copy all</button>
       <button class="btn ghost" id="dl">Download .txt</button>
     </div>
-    <div class="flags">
-      <div class="flag"><span class="d"></span><span><b>Import fails on existing records.</b> If a domain's zone already has an apex MX or SPF TXT (e.g. from WorkMail), Route 53's import creates nothing — edit those in place instead, and create the mail CNAME separately.</span></div>
-      <div class="flag"><span class="d"></span><span><b>DKIM not included.</b> hostedemail issues a DKIM selector record per domain — grab it from the OpenSRS panel and add it, or outbound mail fails DKIM.</span></div>
-    </div>
+    <div class="flags" id="flags"></div>
   </div>
 </div>
 
@@ -100,25 +112,78 @@ example.net</textarea>
 
 <script>
   const $ = id => document.getElementById(id);
+  let provider = 'route53';
+
+  const TITLES = {
+    route53:    'Zone file — Route 53 (Import zone file)',
+    cloudflare: 'Zone file — Cloudflare (Import DNS records)',
+    namecheap:  'Records — Namecheap (Advanced DNS, manual)'
+  };
+
+  const FLAGS = {
+    route53: [
+      {t:'Where to import.', b:'Route 53 → Hosted zones → your domain → Import zone file → paste → Import.'},
+      {t:'Import fails on existing records.', b:'If the zone already has an apex MX or SPF TXT (e.g. from WorkMail), nothing is created — edit those in place instead and add the mail CNAME separately.'},
+      {t:'DKIM not included.', b:'hostedemail issues a DKIM selector record per domain — grab it from the OpenSRS panel and add it, or outbound mail fails DKIM.'}
+    ],
+    cloudflare: [
+      {t:'Where to import.', b:'Cloudflare → DNS → Records → ⋯ (top right) → Import and Export → Import DNS records → paste.'},
+      {t:'Set the mail CNAME to DNS only.', b:'After import, click the orange cloud on mail.<domain> so it turns grey (DNS only) — proxying breaks mail.'},
+      {t:'DKIM not included.', b:'Add the hostedemail DKIM selector from the OpenSRS panel, or outbound mail fails DKIM.'}
+    ],
+    namecheap: [
+      {t:'Add records by hand.', b:'Namecheap has no bulk import — add each under Domain → Advanced DNS → Add New Record. Host @ = the root domain. Set Mail Settings → Custom MX so the MX record takes effect.'},
+      {t:'No quotes, no trailing dots.', b:'Namecheap adds those itself — paste the raw Value shown above. TTL can stay Automatic (or 1 min for a fast cutover).'},
+      {t:'DKIM not included.', b:'Add the hostedemail DKIM selector from the OpenSRS panel, or outbound mail fails DKIM.'}
+    ]
+  };
+
+  function bindBlock(d, ttl, dmarc){
+    const L = [];
+    L.push(`mail.${d}.  ${ttl}  IN  CNAME  mail.${d}.cust.hostedemail.com.`);
+    L.push(`${d}.  ${ttl}  IN  MX     10 mx.${d}.cust.hostedemail.com.`);
+    L.push(`${d}.  ${ttl}  IN  TXT    "v=spf1 include:_spf.hostedemail.com ~all"`);
+    if(dmarc) L.push(`_dmarc.${d}.  ${ttl}  IN  TXT    "v=DMARC1; p=none;"`);
+    return `; ===== ${d} =====\n` + L.join('\n');
+  }
+
+  function namecheapBlock(d, ttl, dmarc){
+    const L = [];
+    L.push(`CNAME  Host: mail     Value: mail.${d}.cust.hostedemail.com`);
+    L.push(`MX     Host: @        Value: mx.${d}.cust.hostedemail.com     Priority: 10`);
+    L.push(`TXT    Host: @        Value: v=spf1 include:_spf.hostedemail.com ~all`);
+    if(dmarc) L.push(`TXT    Host: _dmarc   Value: v=DMARC1; p=none;`);
+    return `; ===== ${d} =====   (Advanced DNS → Add New Record · TTL: Automatic)\n` + L.join('\n');
+  }
+
+  function renderFlags(){
+    $('flags').innerHTML = FLAGS[provider].map(f =>
+      `<div class="flag"><span class="d"></span><span><b>${f.t}</b> ${f.b}</span></div>`
+    ).join('');
+  }
 
   function build(){
     const raw = $('domains').value.split('\n').map(s=>s.trim().toLowerCase().replace(/\.$/,'')).filter(Boolean);
     const ttl = parseInt($('ttl').value,10) || 300;
     const dmarc = $('dmarc').checked;
-    const blocks = [];
-    raw.forEach(d=>{
-      const lines = [];
-      lines.push(`mail.${d}.  ${ttl}  IN  CNAME  mail.${d}.cust.hostedemail.com.`);
-      lines.push(`${d}.  ${ttl}  IN  MX     10 mx.${d}.cust.hostedemail.com.`);
-      lines.push(`${d}.  ${ttl}  IN  TXT    "v=spf1 include:_spf.hostedemail.com ~all"`);
-      if(dmarc) lines.push(`_dmarc.${d}.  ${ttl}  IN  TXT    "v=DMARC1; p=none;"`);
-      blocks.push(`; ===== ${d} =====\n` + lines.join('\n'));
-    });
+    const blocks = raw.map(d => provider === 'namecheap' ? namecheapBlock(d,ttl,dmarc) : bindBlock(d,ttl,dmarc));
     $('out').textContent = blocks.join('\n\n') || '; enter a domain above';
-    $('count').textContent = raw.length ? `${raw.length} domain${raw.length>1?'s':''} · ${raw.length*(dmarc?4:3)} records` : '';
+    $('outTitle').textContent = TITLES[provider];
+    const perDomain = dmarc ? 4 : 3;
+    $('count').textContent = raw.length ? `${raw.length} domain${raw.length>1?'s':''} · ${raw.length*perDomain} records` : '';
+    renderFlags();
   }
 
   function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1600); }
+
+  document.querySelectorAll('.tab').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      provider = btn.dataset.p;
+      build();
+    });
+  });
 
   $('copy').onclick = ()=>{
     const txt = $('out').textContent;
@@ -128,7 +193,7 @@ example.net</textarea>
   };
   $('dl').onclick = ()=>{
     const blob = new Blob([$('out').textContent],{type:'text/plain'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='opensrs_records.txt'; a.click(); URL.revokeObjectURL(a.href);
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`opensrs_${provider}.txt`; a.click(); URL.revokeObjectURL(a.href);
   };
 
   ['domains','ttl','dmarc'].forEach(id=>{ $(id).addEventListener('input',build); $(id).addEventListener('change',build); });
