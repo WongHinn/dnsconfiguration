@@ -116,7 +116,7 @@ example.net</textarea>
 
   const TITLES = {
     route53:    'Zone file — Route 53 (Import zone file)',
-    cloudflare: 'Zone file — Cloudflare (Import DNS records)',
+    cloudflare: 'Zone file — Cloudflare (Import DNS records · TTL Auto)',
     namecheap:  'Records — Namecheap (Advanced DNS, manual)'
   };
 
@@ -129,6 +129,7 @@ example.net</textarea>
     cloudflare: [
       {t:'Where to import.', b:'Cloudflare → DNS → Records → ⋯ (top right) → Import and Export → Import DNS records → paste.'},
       {t:'Set the mail CNAME to DNS only.', b:'After import, click the orange cloud on mail.<domain> so it turns grey (DNS only) — proxying breaks mail.'},
+      {t:'TTL shows as Auto.', b:'The TTL of 1 in the file is how Cloudflare flags a record as Auto — the TTL box above is ignored on this tab.'},
       {t:'DKIM not included.', b:'Add the hostedemail DKIM selector from the OpenSRS panel, or outbound mail fails DKIM.'}
     ],
     namecheap: [
@@ -166,7 +167,7 @@ example.net</textarea>
     const raw = $('domains').value.split('\n').map(s=>s.trim().toLowerCase().replace(/\.$/,'')).filter(Boolean);
     const ttl = parseInt($('ttl').value,10) || 300;
     const dmarc = $('dmarc').checked;
-    const blocks = raw.map(d => provider === 'namecheap' ? namecheapBlock(d,ttl,dmarc) : bindBlock(d,ttl,dmarc));
+    const blocks = raw.map(d => provider === 'namecheap' ? namecheapBlock(d,ttl,dmarc) : bindBlock(d, provider === 'cloudflare' ? 1 : ttl, dmarc));
     $('out').textContent = blocks.join('\n\n') || '; enter a domain above';
     $('outTitle').textContent = TITLES[provider];
     const perDomain = dmarc ? 4 : 3;
