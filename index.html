@@ -68,11 +68,9 @@
 
   <div class="panel">
     <label for="domains">Domains — one per line</label>
-    <textarea id="domains" placeholder="rhizomeco.org&#10;glintwell.org&#10;refraxis.net">rhizomeco.org
-glintwell.org
-refraxis.net
-bellowsco.com
-sporecraft.org</textarea>
+    <textarea id="domains" placeholder="example.com&#10;example.org&#10;example.net">example.com
+example.org
+example.net</textarea>
     <p class="hint">Enter the bare apex domain (no <span style="font-family:monospace">www</span>, no trailing dot).</p>
 
     <div class="opts">
@@ -102,7 +100,6 @@ sporecraft.org</textarea>
 
 <script>
   const $ = id => document.getElementById(id);
-  function pad(list){ return list.map(s => s.length).reduce((a,b)=>Math.max(a,b), 0); }
 
   function build(){
     const raw = $('domains').value.split('\n').map(s=>s.trim().toLowerCase().replace(/\.$/,'')).filter(Boolean);
